@@ -1,63 +1,79 @@
 // ============================================================
 //  盘搜全网聚合搜索 · 后端（Vercel Serverless Function）
-//  爬取磁力站 + 盘搜站 + 资源论坛，检测存活，只返回有效链接
+//  爬取磁力站 + 盘搜站 + 资源论坛，解析网盘/磁力链接
+//  说明：网盘分享链(quark/baidu/ali/thunder)无法从云端验证是否真实有效
+//        （服务端请求会被盘搜站拦截），故采用"返回解析到的全部直链"策略，
+//        前端交由用户自行打开验证。磁力链由客户端 BT 网络验证。
 // ============================================================
 
 // ---------- 通用请求封装 ----------
-async function fetchJSON(url, opts = {}) {
-  const headers = Object.assign({
-    'User-Agent':
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-      '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-    'Referer': 'https://www.google.com/',
-  }, opts.headers || {});
-
-  const res = await fetch(url, { headers, redirect: 'follow' });
-  const text = await res.text();
-  // 尝试解析为 JSON，失败则返回文本
-  try { return { ok: res.ok, status: res.status, data: JSON.parse(text), text }; }
-  catch (e) { return { ok: res.ok, status: res.status, data: null, text }; }
+function getUA() {
+  return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+         '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 }
 
-// ---------- 存活检测（HEAD 轻量探测） ----------
-async function isAlive(url) {
+async function fetchPage(url, opts = {}) {
+  const headers = Object.assign({
+    'User-Agent': getUA(),
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Cache-Control': 'no-cache',
+  }, opts.headers || {});
+
+  // 根据目标站点设置 Referer，绕过部分反爬
   try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-          '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': '*/*',
-      },
-      redirect: 'follow',
-    });
-    // 200/301/302 = 有效；404/403/410 = 失效
-    if ([404, 403, 410, 451].includes(res.status)) return false;
-    if ([200, 301, 302, 307, 308].includes(res.status)) return true;
-    return res.ok;
-  } catch (e) {
-    return false; // 网络错误 / DNS 失败 = 失效
+    const u = new URL(url);
+    headers['Referer'] = u.origin + '/';
+    headers['Origin'] = u.origin;
+  } catch (e) {}
+
+  const res = await fetch(url, {
+    headers,
+    redirect: 'follow',
+    // Vercel 函数最大超时 10s，单个请求最多等 6s
+    signal: AbortSignal.timeout(6000),
+  });
+  const text = await res.text();
+  return { ok: res.ok, status: res.status, text };
+}
+
+// ---------- 存活检测（保守策略）----------
+// 仅对磁力链做格式校验；网盘链服务端无法验证，默认视为可访问。
+async function isAccessible(item) {
+  // 磁力链：格式合法即视为可访问
+  if (item.type === 'magnet') {
+    return /^magnet:\?xt=urn:btih:[A-Za-z0-9]{20,}/i.test(item.url);
   }
+  // 网盘链：服务端 HEAD 极易被反爬拦截（403/超时），
+  // 误判率极高，故默认 true，由前端用户实际打开验证。
+  // 仅做轻量格式校验 + 明显失效关键词过滤。
+  const deadKw = ['404', 'deleted', 'removed', '失效', '已删除', '不存在'];
+  const lower = item.url.toLowerCase();
+  if (deadKw.some(k => lower.includes(k))) return false;
+  return true;
 }
 
 // ---------- 正则：提取网盘 / 磁力链接 ----------
 const RE = {
-  quark:   /https?:\/\/(?:pan|www)\.?quark\.cn\/s\/[A-Za-z0-9]+/gi,
-  baidu:   /https?:\/\/pan\.baidu\.com\/s\/[A-Za-z0-9_\-]+/gi,
-  aliyun:  /https?:\/\/(?:www\.)?alipan?\.com\/s\/[A-Za-z0-9]+/gi,
-  xunlei:  /https?:\/\/pan\.xunlei\.com\/s\/[A-Za-z0-9]+/gi,
-  magnet:  /magnet:\?xt=urn:btih:[A-Za-z0-9]+/gi,
-  ed2k:    /ed2k:\/\/\|file\|[^|]*\|\|?\//gi,
+  // 夸克网盘：支持 pan.quark.cn / quark.cn / www.quark.cn 等域名
+  quark:  /https?:\/\/(?:[a-z0-9-]+\.)?quark\.cn\/s\/[A-Za-z0-9_\-\.]+/gi,
+  // 百度网盘
+  baidu:  /https?:\/\/(?:pan|yun)\.baidu\.com\/s\/[A-Za-z0-9_\-]+(?:\s+提取码[:：]\s*[A-Za-z0-9]{4})?/gi,
+  // 阿里云盘（aliyundrive / alipan / ali）
+  aliyun: /https?:\/\/(?:www\.)?(?:aliyundrive|alipan)\.com\/s\/[A-Za-z0-9_\-]+/gi,
+  // 迅雷云盘
+  xunlei: /https?:\/\/pan\.xunlei\.com\/s\/[A-Za-z0-9_\-]+/gi,
+  // 磁力链
+  magnet: /magnet:\?xt=urn:btih:[A-Za-z0-9]+(&[^"\s]*)?/gi,
+  // ed2k
+  ed2k:   /ed2k:\/\/\|file\|[^|]+\|\|?\//gi,
 };
 
 function classify(url) {
   if (/quark/i.test(url)) return 'quark';
-  if (/pan\.baidu/i.test(url)) return 'baidu';
-  if (/alipan?\.com/i.test(url)) return 'ali';
   if (/pan\.xunlei/i.test(url)) return 'thunder';
+  if (/pan\.baidu|yun\.baidu/i.test(url)) return 'baidu';
+  if (/alipan?\.com/i.test(url)) return 'ali';
   if (/^magnet:/i.test(url)) return 'magnet';
   if (/^ed2k:/i.test(url)) return 'ed2k';
   return 'other';
@@ -65,13 +81,17 @@ function classify(url) {
 
 function extractAll(text) {
   const out = [];
+  if (!text) return out;
   for (const [type, re] of Object.entries(RE)) {
     const m = text.match(re) || [];
     m.forEach(u => {
+      // 清理末尾可能的标点/引号
+      u = u.replace(/[)\]}"']+$/, '');
+      // 去掉误带的中文/空格
+      u = u.split(/\s+/)[0];
       out.push({ url: u, type: classify(u) });
     });
   }
-  // 去重
   const seen = new Set();
   return out.filter(x => {
     const k = x.url.toLowerCase();
@@ -82,64 +102,59 @@ function extractAll(text) {
 }
 
 // ---------- 各数据源爬取 ----------
+// 每个 fetcher 返回 { source, type, items:[], ok, ms, error }
 const fetchers = [
-  // 1) 磁力多
   {
     name: '磁力多', type: 'magnet',
     run: async (q) => {
       const u = 'https://hd.btdo.cc/search?q=' + encodeURIComponent(q);
-      const r = await fetchJSON(u);
-      if (!r.ok) return [];
+      const r = await fetchPage(u);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       return extractAll(r.text);
     },
   },
-  // 2) 老王磁力
   {
     name: '老王磁力', type: 'magnet',
     run: async (q) => {
       const u = 'https://laowangao.cc/search?q=' + encodeURIComponent(q);
-      const r = await fetchJSON(u);
-      if (!r.ok) return [];
+      const r = await fetchPage(u);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       return extractAll(r.text);
     },
   },
-  // 3) BT1207
   {
     name: 'BT1207', type: 'magnet',
     run: async (q) => {
       const u = 'https://bt1207.com/search?q=' + encodeURIComponent(q);
-      const r = await fetchJSON(u);
-      if (!r.ok) return [];
+      const r = await fetchPage(u);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       return extractAll(r.text);
     },
   },
-  // 4) 竹云盘搜
   {
     name: '竹云盘搜', type: 'quark',
     run: async (q) => {
       const u = 'https://www.zhuyunso.top/search?q=' + encodeURIComponent(q);
-      const r = await fetchJSON(u);
-      if (!r.ok) return [];
+      const r = await fetchPage(u);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       return extractAll(r.text);
     },
   },
-  // 5) 盘友圈
   {
     name: '盘友圈', type: 'quark',
     run: async (q) => {
       const u = 'https://panyq.com/search?q=' + encodeURIComponent(q);
-      const r = await fetchJSON(u);
-      if (!r.ok) return [];
+      const r = await fetchPage(u);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       return extractAll(r.text);
     },
   },
-  // 6) 盘搜搜 PanSoSo
   {
     name: '盘搜搜 PanSoSo', type: 'thunder',
     run: async (q) => {
       const u = 'https://www.pansoso.com/so/' + encodeURIComponent(q);
-      const r = await fetchJSON(u);
-      if (!r.ok) return [];
+      const r = await fetchPage(u);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       return extractAll(r.text);
     },
   },
@@ -147,7 +162,7 @@ const fetchers = [
 
 // ---------- 主入口 ----------
 export default async function handler(req, res) {
-  // CORS（允许前端跨域调用）
+  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -159,27 +174,27 @@ export default async function handler(req, res) {
   }
 
   const magnetOnly = req.query.magnet === '1' || req.query.magnet === 'true';
+  const debug = req.query.debug === '1' || req.query.debug === 'true';
+  const t0 = Date.now();
 
   // 并发爬取
   const tasks = fetchers
     .filter(f => !magnetOnly || f.type === 'magnet')
     .map(async (f) => {
       try {
-        const t0 = Date.now();
+        const t = Date.now();
         const items = await f.run(q);
-        return { source: f.name, type: f.type, items, ms: Date.now() - t0, ok: true };
+        return { source: f.name, type: f.type, items, ms: Date.now() - t, ok: true, error: null };
       } catch (e) {
-        return { source: f.name, type: f.type, items: [], ms: 0, ok: false, error: e.message };
+        return { source: f.name, type: f.type, items: [], ms: Date.now() - t0, ok: false, error: String(e && e.message || e) };
       }
     });
 
   const results = await Promise.all(tasks);
 
-  // 汇总所有链接
+  // 汇总、去重、排序
   let all = [];
   results.forEach(r => { all = all.concat(r.items); });
-
-  // 去重
   const seen = new Set();
   all = all.filter(x => {
     const k = x.url.toLowerCase();
@@ -188,32 +203,44 @@ export default async function handler(req, res) {
     return true;
   });
 
-  // 排序：thunder > quark > baidu > ali > magnet
   const order = { thunder: 0, quark: 1, baidu: 2, ali: 3, magnet: 4, ed2k: 5, other: 6 };
   all.sort((a, b) => (order[a.type] ?? 9) - (order[b.type] ?? 9));
 
-  // 存活检测（并发，限制数量避免超时）
-  const toCheck = all.slice(0, 20);
-  const checks = await Promise.all(
-    toCheck.map(async (x) => ({ ...x, alive: await isAlive(x.url) }))
+  // 可访问性检测（轻量，不误杀网盘链）
+  const checked = await Promise.all(
+    all.map(async (x) => ({ ...x, accessible: await isAccessible(x) }))
   );
-  // 未检测的默认视为 alive=true（避免误杀）
-  const unchecked = all.slice(20).map(x => ({ ...x, alive: true }));
+  const alive = checked.filter(x => x.accessible);
+  const dead = checked.filter(x => !x.accessible);
 
-  const checked = checks.concat(unchecked);
-  const alive = checked.filter(x => x.alive);
-  const dead = checked.filter(x => !x.alive);
+  const total = checked.length;
 
-  return res.status(200).json({
+  const payload = {
     q,
-    total: checked.length,
+    total,
     alive: alive.length,
     dead: dead.length,
+    duration: Date.now() - t0,
     results: alive,
     sources: results.map(r => ({
       name: r.source, type: r.type, ok: r.ok,
-      count: r.items.length, ms: r.ms, error: r.error || null,
+      count: r.items.length, ms: r.ms, error: r.error,
     })),
-    note: '已自动过滤失效链接，仅返回存活直链。',
-  });
+    note: '已解析到直链，网盘链需实际打开验证（服务端无法判断分享是否失效）。',
+  };
+
+  if (debug) {
+    payload.debug = {
+      totalFetched: all.length,
+      deadList: dead.map(x => ({ type: x.type, url: x.url })),
+      htmlSnippets: results.map(r => ({
+        source: r.source,
+        ok: r.ok,
+        error: r.error,
+        sample: '', // 不回传完整 HTML，体积过大
+      })),
+    };
+  }
+
+  return res.status(200).json(payload);
 }
