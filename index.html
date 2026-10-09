@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>盘搜 · 全网资源聚合搜索</title>
+<style>
+  :root{
+    --bg:#0b0d12; --card:#141821; --card2:#1a2030; --line:#262d3d;
+    --txt:#e8ecf3; --sub:#8b94a7; --acc:#4f8cff; --acc2:#2dd4bf;
+    --green:#22c55e; --orange:#f59e0b; --red:#ef4444; --purple:#a855f7;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+    font-size:16px;line-height:1.5;padding-bottom:40px;
+  }
+  .wrap{max-width:860px;margin:0 auto;padding:0 14px}
+  header{padding:20px 0 14px;text-align:center;border-bottom:1px solid var(--line);background:linear-gradient(180deg,rgba(79,140,255,.08),transparent)}
+  header h1{margin:0;font-size:24px;font-weight:800;letter-spacing:1px}
+  header h1 span{color:var(--acc)}
+  header p{margin:6px 0 0;color:var(--sub);font-size:13px}
+  .box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:16px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{background:var(--card2);border:1px solid var(--line);color:var(--sub);border-radius:20px;padding:8px 15px;font-size:14px;cursor:pointer;user-select:none}
+  .chip.on{background:rgba(79,140,255,.18);border-color:var(--acc);color:var(--acc)}
+  .chip.gold.on{background:rgba(45,212,191,.18);border-color:var(--acc2);color:var(--acc2)}
+  .search-row{display:flex;gap:8px;margin-top:12px}
+  .search-row input{flex:1;min-width:0;background:var(--card2);border:1px solid var(--line);border-radius:11px;color:var(--txt);font-size:16px;padding:13px 14px;outline:none;-webkit-appearance:none;appearance:none}
+  .search-row input:focus{border-color:var(--acc)}
+  .btn{background:var(--acc);color:#fff;border:none;border-radius:11px;font-size:16px;font-weight:700;padding:0 20px;cursor:pointer;white-space:nowrap}
+  .btn:active{opacity:.8}
+  .btn.gold{background:var(--acc2)}
+  .btn.ghost{background:var(--card2);border:1px solid var(--line);color:var(--txt)}
+  .btn[disabled]{opacity:.5}
+  .sec-title{font-size:14px;color:var(--sub);margin:18px 0 10px;font-weight:700}
+  .results{margin-top:18px}
+  .stat{display:flex;gap:14px;flex-wrap:wrap;margin:12px 0;font-size:13px;color:var(--sub)}
+  .stat b{color:var(--green)}
+  .stat .d b{color:var(--red)}
+  .badge{flex-shrink:0;font-size:11px;font-weight:800;padding:4px 8px;border-radius:6px;margin-top:3px;letter-spacing:.5px;white-space:nowrap}
+  .badge.thunder{background:rgba(245,158,11,.18);color:var(--orange)}
+  .badge.quark{background:rgba(45,212,191,.18);color:var(--acc2)}
+  .badge.baidu{background:rgba(79,140,255,.18);color:var(--acc)}
+  .badge.ali{background:rgba(34,197,94,.18);color:var(--green)}
+  .badge.magnet{background:rgba(168,85,247,.18);color:var(--purple)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:13px 14px;margin-bottom:10px}
+  .card-top{display:flex;align-items:flex-start;gap:10px}
+  .card-name{font-weight:700;font-size:15px;flex:1;word-break:break-all}
+  .card-link{color:var(--sub);font-size:11px;margin-top:8px;word-break:break-all;background:var(--card2);border-radius:8px;padding:7px 9px}
+  .card-foot{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
+  .open{flex:1;min-width:120px;text-align:center;background:var(--acc);color:#fff;text-decoration:none;border-radius:10px;padding:11px;font-weight:700;font-size:15px;display:block}
+  .open.gold{background:var(--orange)}
+  .open.purple{background:var(--purple)}
+  .open.plain{background:var(--card2);border:1px solid var(--line);color:var(--txt)}
+  .empty{text-align:center;color:var(--sub);padding:30px 0;font-size:14px}
+  .loading{text-align:center;padding:40px 0;color:var(--acc)}
+  .loading .sp{display:inline-block;width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:spin 0.8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .tip{color:var(--sub);font-size:13px;margin-top:14px;line-height:1.7;background:var(--card2);border-radius:10px;padding:12px 14px}
+  .tip b{color:var(--txt)}
+  /* 数据源诊断 */
+  .diag{margin-top:16px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .diag-h{background:var(--card2);padding:10px 14px;font-size:13px;font-weight:700;cursor:pointer;user-select:none;display:flex;justify-content:space-between;align-items:center}
+  .diag-h span.t{color:var(--sub);font-size:12px;font-weight:400}
+  .diag-b{display:none;padding:0}
+  .diag-b.show{display:block}
+  .diag-row{display:flex;justify-content:space-between;align-items:center;padding:9px 14px;border-top:1px solid var(--line);font-size:13px}
+  .diag-row:first-child{border-top:none}
+  .diag-row .n{font-weight:600}
+  .diag-row .m{color:var(--sub);font-size:11px}
+  .ok{color:var(--green)} .fail{color:var(--red)} .warn{color:var(--orange)}
+  footer{text-align:center;color:#5a6478;font-size:12px;margin-top:30px;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>盘搜 · <span>全网资源聚合</span></h1>
+    <p>输入片名 → 并发爬取多站 → 返回解析到的直链</p>
+  </header>
+
+  <div class="box">
+    <div class="chips" id="templates">
+      <div class="chip" data-q="Dahmer 2022 1080p">怪物达莫</div>
+      <div class="chip" data-q="紫罗兰永恒花园 剧场版 4K">紫罗兰永恒花园</div>
+      <div class="chip" data-q="抓特务 2026">抓特务 2026</div>
+      <div class="chip" data-q="惊蛰无声 2026 4K">惊蛰无声</div>
+    </div>
+    <div class="search-row">
+      <input id="kw" type="search" placeholder="输入片名，推荐英文原名，如：Dahmer 2022" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="search-row">
+      <button class="btn" id="go" type="button">全网搜</button>
+      <button class="btn gold" id="magnetOnly" type="button">仅磁力</button>
+      <button class="btn ghost" id="retry" type="button">重新检测</button>
+    </div>
+  </div>
+
+  <div class="box">
+    <div class="sec-title">网盘类型（迅雷优先）</div>
+    <div class="chips filters">
+      <div class="chip gold on" data-type="thunder">⚡ 迅雷</div>
+      <div class="chip on" data-type="quark">夸克</div>
+      <div class="chip on" data-type="baidu">百度</div>
+      <div class="chip on" data-type="ali">阿里云盘</div>
+      <div class="chip" data-type="magnet">🧲 磁力</div>
+    </div>
+  </div>
+
+  <div class="results" id="results">
+    <div class="empty">输入关键词开始搜索 · 试试点上面的模板</div>
+  </div>
+
+  <div class="tip">
+    <b>说明</b><br>
+    1. 点「全网搜」后，后端并发爬取多个磁力站/盘搜站，<b>解析出直链返回</b><br>
+    2. 网盘分享链<b>必须实际打开</b>才能判断是否失效（服务端无法验证），请自行打开确认<br>
+    3. 搜不到结果时，勾选「仅磁力」切换到磁力站（磁力站资源更全）<br>
+    4. <b>英文原名命中率更高</b>，如《怪物》搜 <b>Dahmer 2022</b> 比搜"怪物"准得多
+  </div>
+
+  <footer>
+    资源由第三方站点提供，仅供学习交流，请于下载后 24 小时内删除<br>
+    本工具不存储任何资源文件
+  </footer>
+</div>
+
+<script>
+var API = '/api/search';
+var resultsEl = document.getElementById('results');
+var kwEl = document.getElementById('kw');
+var goBtn = document.getElementById('go');
+var magnetBtn = document.getElementById('magnetOnly');
+var retryBtn = document.getElementById('retry');
+var activeTypes = {'thunder':1,'quark':1,'baidu':1,'ali':1};
+var lastQ = '';
+
+function labelOf(t){
+  return t==='thunder'?'迅雷':t==='quark'?'夸克':t==='baidu'?'百度':t==='ali'?'阿里':'磁力';
+}
+function badgeOf(t){
+  return t==='thunder'?'thunder':t==='quark'?'quark':t==='baidu'?'baidu':t==='ali'?'ali':'magnet';
+}
+
+function copyText(txt, btn){
+  var done = function(){ var o=btn.textContent; btn.textContent='已复制 ✓'; setTimeout(function(){btn.textContent=o;},1500); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done, function(){ fb(txt); done(); });
+  } else { fb(txt); done(); }
+}
+function fb(txt){
+  var ta=document.createElement('textarea');
+  ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0';
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); }catch(e){}
+  document.body.removeChild(ta);
+}
+
+function go(href){
+  try{
+    var a = document.createElement('a');
+    a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }catch(e){ window.location.href = href; }
+}
+
+function renderLoading(q){
+  resultsEl.innerHTML =
+    '<div class="loading"><div class="sp"></div></div>'+
+    '<div class="loading" style="padding:10px">正在爬取「'+q+'」…</div>';
+}
+
+function renderDiag(sources){
+  if(!sources || !sources.length) return '';
+  var rows = sources.map(function(s){
+    var cls, txt;
+    if(s.ok && s.count > 0){ cls='ok'; txt='✓ 命中 '+s.count+' 条 ('+s.ms+'ms)'; }
+    else if(s.ok && s.count === 0){ cls='warn'; txt='✓ 可访问，无结果 ('+s.ms+'ms)'; }
+    else { cls='fail'; txt='✗ 失败：'+(s.error||'未知').substring(0,40); }
+    var badge = s.type==='magnet' ? '🧲' : '🔗';
+    return '<div class="diag-row"><span class="n">'+badge+' '+s.name+'</span><span class="m '+cls+'">'+txt+'</span></div>';
+  }).join('');
+
+  return '<div class="diag">'+
+    '<div class="diag-h" id="diagToggle">数据源诊断 <span class="t">点击展开 ▾</span></div>'+
+    '<div class="diag-b" id="diagBody">'+rows+'</div>'+
+  '</div>';
+}
+
+function render(data){
+  var html = '';
+
+  if(!data.results || !data.results.length){
+    html += '<div class="empty">没有解析到直链。<br>试试「仅磁力」，或换个关键词（<b>英文原名命中率更高</b>）</div>';
+    html += renderDiag(data.sources);
+    resultsEl.innerHTML = html;
+    return;
+  }
+
+  var list = data.results.filter(function(x){ return activeTypes[x.type]; });
+  if(!list.length) list = data.results;
+
+  var order = {'thunder':0,'quark':1,'baidu':2,'ali':3,'magnet':4,'ed2k':5,'other':6};
+  list.sort(function(a,b){ return (order[a.type]??9)-(order[b.type]??9); });
+
+  var groups = {};
+  list.forEach(function(x){ (groups[x.type]=groups[x.type]||[]).push(x); });
+
+  var meta = [
+    {key:'thunder', title:'⚡ 迅雷云盘'},
+    {key:'quark', title:'夸克网盘'},
+    {key:'baidu', title:'百度网盘'},
+    {key:'ali', title:'阿里云盘'},
+    {key:'magnet', title:'🧲 磁力链'}
+  ];
+
+  html +=
+    '<div class="stat">'+
+      '<span>关键词：<b>'+data.q+'</b></span>'+
+      '<span>解析到 <b>'+data.total+'</b> 条直链</span>'+
+      '<span class="d">耗时 '+data.duration+'ms</span>'+
+    '</div>';
+
+  meta.forEach(function(g){
+    var arr = groups[g.key];
+    if(!arr || !arr.length) return;
+    html += '<div class="sec-title" style="margin-top:18px">'+g.title+'<span style="font-weight:400"> · '+arr.length+' 条</span></div>';
+    arr.forEach(function(x){
+      var safe = x.url.replace(/'/g,"\\'");
+      var btnCls = x.type==='magnet' ? 'purple' : (x.type==='thunder'?'gold':'');
+      html +=
+        '<div class="card">'+
+          '<div class="card-top">'+
+            '<span class="badge '+badgeOf(x.type)+'">'+labelOf(x.type)+'</span>'+
+            '<div class="card-name">'+labelOf(x.type)+' 直链</div>'+
+          '</div>'+
+          '<div class="card-link">'+x.url+'</div>'+
+          '<div class="card-foot">'+
+            '<a class="open '+btnCls+'" href="'+x.url+'" target="_blank" rel="noopener noreferrer" onclick="event.preventDefault();go(\''+safe+'\')">打开</a>'+
+            '<button class="open plain" type="button" onclick="copyText(\''+safe+'\', this)">复制链接</button>'+
+          '</div>'+
+        '</div>';
+    });
+  });
+
+  html += renderDiag(data.sources);
+  resultsEl.innerHTML = html;
+
+  var tog = document.getElementById('diagToggle');
+  var body = document.getElementById('diagBody');
+  if(tog && body){
+    tog.onclick = function(){
+      body.classList.toggle('show');
+      var t = tog.querySelector('span.t');
+      t.textContent = body.classList.contains('show') ? '点击收起 ▴' : '点击展开 ▾';
+    };
+  }
+}
+
+function renderError(msg, detail){
+  var h = '<div class="empty">⚠️ '+msg+'</div>';
+  if(detail) h += '<div class="empty" style="font-size:12px;color:#5a6478;word-break:break-all">'+detail+'</div>';
+  resultsEl.innerHTML = h;
+}
+
+async function search(magnetOnly){
+  var q = (kwEl.value || '').replace(/^\s+|\s+$/g,'');
+  if(!q){ kwEl.focus(); return; }
+  lastQ = q;
+  renderLoading(q);
+  goBtn.disabled = true;
+
+  try{
+    var url = API + '?q=' + encodeURIComponent(q);
+    if(magnetOnly) url += '&magnet=1';
+    url += '&debug=1';
+    var res = await fetch(url);
+    var data = await res.json().catch(function(){ return null; });
+    if(!res.ok || !data){
+      var err = (data && data.error) ? data.error : ('HTTP '+res.status);
+      // 友好提示常见拦截
+      if(res.status === 403){
+        err = '请求被安全策略拦截。请稍后重试，或开启浏览器无痕模式再试。';
+      }
+      throw new Error(err);
+    }
+    render(data);
+  }catch(e){
+    renderError('搜索失败：' + e.message);
+  }finally{
+    goBtn.disabled = false;
+  }
+}
+
+goBtn.onclick = function(){ search(false); };
+magnetBtn.onclick = function(){ search(true); };
+retryBtn.onclick = function(){ if(lastQ){ kwEl.value = lastQ; search(false); } };
+kwEl.addEventListener('keydown', function(e){ if(e.key==='Enter') search(false); });
+
+document.getElementById('templates').addEventListener('click', function(e){
+  var c = e.target.closest('.chip');
+  if(!c) return;
+  kwEl.value = c.getAttribute('data-q');
+  search(false);
+});
+
+document.querySelector('.filters').addEventListener('click', function(e){
+  var c = e.target.closest('.chip');
+  if(!c) return;
+  var t = c.getAttribute('data-type');
+  if(activeTypes[t]){ delete activeTypes[t]; c.classList.remove('on'); }
+  else { activeTypes[t]=1; c.classList.add('on'); }
+});
+</script>
+</body>
+</html>
